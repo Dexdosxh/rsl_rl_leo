@@ -11,7 +11,7 @@ import torch
 import warnings
 from tensordict import TensorDict
 
-from rsl_rl.algorithms import PPO
+from rsl_rl.algorithms import PPO, PPO_Disc
 from rsl_rl.env import VecEnv
 from rsl_rl.modules import (
     ActorCritic,
@@ -20,6 +20,7 @@ from rsl_rl.modules import (
     resolve_rnd_config,
     resolve_symmetry_config,
 )
+from rsl_rl.modules import ActorCritic_Disc
 from rsl_rl.storage import RolloutStorage
 from rsl_rl.utils import resolve_obs_groups
 from rsl_rl.utils.logger import Logger
@@ -78,6 +79,7 @@ class OnPolicyRunner:
         # Start training
         start_it = self.current_learning_iteration
         total_it = start_it + num_learning_iterations
+        reward_achieve_ratio = 0.0
         for it in range(start_it, total_it):
             start = time.time()
             # Rollout
@@ -103,8 +105,36 @@ class OnPolicyRunner:
                 # Compute returns
                 self.alg.compute_returns(obs)
 
-            # Update policy
-            loss_dict = self.alg.update()
+            # get new reward_ratio
+            # reward_achieve_ratio_new = min([extras['log']['Episode_Reward/'+key]/self.cfg["rewards_expect"][key] for key in self.cfg["rewards_expect"]])
+            ratios = []
+            for key, target in self.cfg["rewards_expect"].items():
+                val = extras['log']['Episode_Reward/' + key]
+
+                # if target > 0:
+                #     ratio = torch.clamp(val / target, 0.0, 1.0)
+                # else:
+                rel_dev = abs(val - target) / abs(target)
+                ratio = torch.clamp(1.0 - rel_dev, 0.0, 1.0)
+                ratios.append(ratio)
+            reward_achieve_ratio_new = min(ratios)
+            reward_achieve_ratio = (1-0.05) * reward_achieve_ratio + 0.05 * reward_achieve_ratio_new
+            reward_achieve_ratio = torch.clamp(reward_achieve_ratio, min=0.0, max=0.99)
+            # update policy
+            if isinstance(self.alg, PPO):
+                loss_dict = self.alg.update()
+                min_std = self.cfg["gage_init_std"] * (1.0-reward_achieve_ratio)
+                # if hasattr(self.alg.policy, "std"):
+                self.alg.policy.std.data.clamp_(min=min_std)
+            elif isinstance(self.alg, PPO_Disc):
+
+                if hasattr(self.alg.policy, "goal_achieve"):
+                    self.alg.policy.goal_achieve = reward_achieve_ratio.item()
+                loss_dict = self.alg.update()
+            else:
+                raise ValueError(f"Algorithm {self.alg} not defined!")
+            # update policy
+            # loss_dict = self.alg.update()
 
             stop = time.time()
             learn_time = stop - start
@@ -121,6 +151,7 @@ class OnPolicyRunner:
                 learning_rate=self.alg.learning_rate,
                 action_std=self.alg.policy.action_std,
                 rnd_weight=self.alg.rnd.weight if self.alg_cfg["rnd_cfg"] else None,
+                reward_achieve_ratio=reward_achieve_ratio,
             )
 
             # Save model
@@ -246,7 +277,7 @@ class OnPolicyRunner:
         # Set device to the local rank
         torch.cuda.set_device(self.gpu_local_rank)
 
-    def _construct_algorithm(self, obs: TensorDict) -> PPO:
+    def _construct_algorithm(self, obs: TensorDict) -> PPO | PPO_Disc:
         """Construct the actor-critic algorithm."""
         # Resolve RND config if used
         self.alg_cfg = resolve_rnd_config(self.alg_cfg, obs, self.cfg["obs_groups"], self.env)
@@ -268,7 +299,7 @@ class OnPolicyRunner:
 
         # Initialize the policy
         actor_critic_class = eval(self.policy_cfg.pop("class_name"))
-        actor_critic: ActorCritic | ActorCriticRecurrent | ActorCriticCNN = actor_critic_class(
+        actor_critic: ActorCritic | ActorCriticRecurrent | ActorCriticCNN | ActorCritic_Disc = actor_critic_class(
             obs, self.cfg["obs_groups"], self.env.num_actions, **self.policy_cfg
         ).to(self.device)
 
@@ -279,7 +310,7 @@ class OnPolicyRunner:
 
         # Initialize the algorithm
         alg_class = eval(self.alg_cfg.pop("class_name"))
-        alg: PPO = alg_class(
+        alg: PPO | PPO_Disc = alg_class(
             actor_critic, storage, device=self.device, **self.alg_cfg, multi_gpu_cfg=self.multi_gpu_cfg
         )
 

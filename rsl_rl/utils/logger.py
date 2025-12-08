@@ -113,6 +113,7 @@ class Logger:
         learning_rate: float,
         action_std: torch.Tensor,
         rnd_weight: float | None,
+        reward_achieve_ratio: float | torch.tensor | None = None,
         print_minimal: bool = False,
         width: int = 80,
         pad: int = 40,
@@ -155,6 +156,12 @@ class Logger:
 
             # Log noise std
             self.writer.add_scalar("Policy/mean_noise_std", action_std.mean().item(), it)
+            if reward_achieve_ratio is not None:
+                if isinstance(reward_achieve_ratio, torch.Tensor):
+                    rar_value = reward_achieve_ratio.item()
+                else:
+                    rar_value = float(reward_achieve_ratio)
+                self.writer.add_scalar("Policy/reward_achieve_ratio", rar_value, it)
 
             # Log performance
             fps = int(collection_size / (collect_time + learn_time))
@@ -208,6 +215,8 @@ class Logger:
 
             # Print noise std
             log_string += f"""{"Mean action noise std:":>{pad}} {action_std.mean().item():.2f}\n"""
+            if reward_achieve_ratio is not None:
+                log_string += f"""{"Reward achieve ratio:":>{pad}} {rar_value:.4f}\n"""
 
             # Print episode extras
             if not print_minimal:

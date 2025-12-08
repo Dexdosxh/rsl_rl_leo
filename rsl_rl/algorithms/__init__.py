@@ -7,5 +7,6 @@
 
 from .distillation import Distillation
 from .ppo import PPO
+from .ppo_disc import PPO_Disc
 
-__all__ = ["PPO", "Distillation"]
+__all__ = ["PPO", "Distillation", "PPO_Disc"]
