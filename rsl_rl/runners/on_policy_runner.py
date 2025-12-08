@@ -20,7 +20,7 @@ from rsl_rl.modules import (
     resolve_rnd_config,
     resolve_symmetry_config,
 )
-from rsl_rl.modules import ActorCritic_Disc
+from rsl_rl.modules.actor_critic import ActorCritic_Disc
 from rsl_rl.storage import RolloutStorage
 from rsl_rl.utils import resolve_obs_groups
 from rsl_rl.utils.logger import Logger
