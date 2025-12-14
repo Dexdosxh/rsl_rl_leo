@@ -107,35 +107,7 @@ class OnPolicyRunner:
 
             # get new reward_ratio
             # reward_achieve_ratio_new = min([extras['log']['Episode_Reward/'+key]/self.cfg["rewards_expect"][key] for key in self.cfg["rewards_expect"]])
-            ratios = []
-            for key, values in self.cfg["rewards_expect"].items():
-                val = extras['log']['Episode_Reward/' + key]
-                # extract target and minimum goal
-                if isinstance(values, list):
-                    target = values[0]
-                    min_goal = values[1]
-                else:
-                    target = values
-
-                # for positive goals do normal Gage (clamp so it can't exceed 1.0)
-                if target > 0:
-                    ratio = torch.clamp(val / target, 0.0, 1.0)
-
-                else:
-                    # for negative goals, it needs to be 1 until it is worse than the goal
-                    if val >= target:
-                        ratio = 1.0
-
-                    # if it is worse than the minimum goal it is 0
-                    elif val < min_goal:
-                        ratio = 0.0
-                        
-                    # and if its in between it is handled with normal gage but absolute values
-                    # linear polarisation between target and minimum goal
-                    else:
-                        target, min_goal, val = abs(target), abs(min_goal), abs(val)
-                        ratio = (val - target) / (min_goal - target)
-                ratios.append(ratio)
+            ratios = self.compute_reward_ratios(extras)
             reward_achieve_ratio_new = min(ratios)
             reward_achieve_ratio = (1-0.05) * reward_achieve_ratio + 0.05 * reward_achieve_ratio_new
             reward_achieve_ratio = torch.clamp(reward_achieve_ratio, min=0.0, max=0.99)
@@ -334,3 +306,42 @@ class OnPolicyRunner:
         )
 
         return alg
+    
+    def compute_reward_ratios(self, extras: dict) -> list:
+        ratios = []
+        for key, values in self.cfg["rewards_expect"].items():
+            val = extras['log']['Episode_Reward/' + key]
+            # extract target and minimum goal
+            if isinstance(values, list):
+                target = values[0]
+                min_goal = values[1]
+            else:
+                target = values
+
+            # for positive goals do normal Gage (clamp so it can't exceed 1.0)
+            if target > 0:
+                ratio = torch.clamp(val / target, 0.0, 1.0)
+
+            else:
+                if isinstance(values, list):
+                    # for negative goals, it needs to be 1 until it is worse than the goal
+                    if val >= target:
+                        ratio = 1.0
+
+                    # if it is worse than the minimum goal it is 0
+                    elif val < min_goal:
+                        ratio = 0.0
+                        
+                    # and if its in between it is handled with normal gage but absolute values
+                    # linear polarisation between target and minimum goal
+                    else:
+                        target, min_goal, val = abs(target), abs(min_goal), abs(val)
+                        ratio = (val - target) / (min_goal - target)
+                else:
+                    if val >= target:
+                        ratio = 1.0
+                    else:
+                        abs_ratio = abs(target) / abs(val)
+                        ratio = torch.clamp(abs_ratio, 0.0, 1.0)
+            ratios.append(ratio)
+        return ratios
