@@ -33,7 +33,7 @@ class PPO:
         gamma: float = 0.99,
         lam: float = 0.95,
         value_loss_coef: float = 1.0,
-        entropy_coef: float = 0.01,
+        entropy_coef: float = 0.00,
         learning_rate: float = 0.001,
         max_grad_norm: float = 1.0,
         use_clipped_value_loss: bool = True,

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import time
 import torch
@@ -79,7 +80,7 @@ class OnPolicyRunner:
         # Start training
         start_it = self.current_learning_iteration
         total_it = start_it + num_learning_iterations
-        reward_achieve_ratio = 0.0
+        reward_achieve_ratio = torch.tensor(0.0, device=self.device)
         for it in range(start_it, total_it):
             start = time.time()
             # Rollout
@@ -106,15 +107,17 @@ class OnPolicyRunner:
                 self.alg.compute_returns(obs)
 
             # get new reward_ratio
-            # reward_achieve_ratio_new = min([extras['log']['Episode_Reward/'+key]/self.cfg["rewards_expect"][key] for key in self.cfg["rewards_expect"]])
             ratios = self.compute_reward_ratios(extras)
-            reward_achieve_ratio_new = min(ratios)
+            reward_achieve_ratio_new = torch.min(torch.stack(ratios))
             reward_achieve_ratio = (1-0.05) * reward_achieve_ratio + 0.05 * reward_achieve_ratio_new
             reward_achieve_ratio = torch.clamp(reward_achieve_ratio, min=0.0, max=0.99)
             # update policy
             if isinstance(self.alg, PPO):
                 loss_dict = self.alg.update()
-                min_std = self.cfg["gage_init_std"] * (1.0-reward_achieve_ratio)
+                rest_std = 1.0-reward_achieve_ratio
+                # min_std = self.cfg["gage_init_std"] * (1.0-reward_achieve_ratio)
+                min_std = self.cfg["gage_init_std"] * (rest_std ** 0.5)
+                # min_std = torch.clamp(min_std, min=self.cfg["gage_min_std"], max=self.cfg["gage_init_std"])
                 # if hasattr(self.alg.policy, "std"):
                 self.alg.policy.std.data.clamp_(min=min_std)
             elif isinstance(self.alg, PPO_Disc):
@@ -307,17 +310,20 @@ class OnPolicyRunner:
 
         return alg
     
+
     def compute_reward_ratios(self, extras: dict) -> list[torch.Tensor]:
         ratios: list[torch.Tensor] = []
-
-        for key, values in self.cfg["rewards_expect"].items():
+        # get alle rewards from rewards_expect that are != 0.0
+        # extract the reward values from self.cfg["rewards_expect"].items() that are != 0.0 and create a dictionary to
+        # go trough.
+        rewards_expect = {key: values for key, values in self.cfg["rewards_expect"].items() if values != 0.0}
+        for key, values in rewards_expect.items():
             val = extras["log"]["Episode_Reward/" + key]
-
             # ensure tensor
             if not isinstance(val, torch.Tensor):
                 val = torch.tensor(val, device=self.device)
 
-            one = torch.ones_like(val)
+            one = torch.ones_like(val)  
             zero = torch.zeros_like(val)
 
             # extract target / min_goal
@@ -360,3 +366,4 @@ class OnPolicyRunner:
             ratios.append(ratio)
 
         return ratios
+
