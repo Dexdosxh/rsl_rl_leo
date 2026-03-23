@@ -304,6 +304,7 @@ class OnPolicyRunner:
 
         # Initialize the algorithm
         alg_class = eval(self.alg_cfg.pop("class_name"))
+        self.alg_cfg.pop("share_cnn_encoders", None)
         alg: PPO | PPO_Disc = alg_class(
             actor_critic, storage, device=self.device, **self.alg_cfg, multi_gpu_cfg=self.multi_gpu_cfg
         )
